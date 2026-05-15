@@ -177,7 +177,10 @@ async function startBot(token, selfId) {
 
               if (cmd?.toLowerCase() === "say") {
                 const text = args.join(" ");
-                if (text) {
+                const nested = text.trim().toLowerCase().startsWith(`${PREFIX}say`);
+                if (nested) {
+                  await send(msg.channel_id, "Nested b!say commands are not allowed.", token);
+                } else if (text) {
                   console.log(`[say] ${msg.author.username}: ${text}`);
                   await send(msg.channel_id, text, token);
                 }
