@@ -1,6 +1,8 @@
 import WebSocket from "ws";
 import https from "https";
 import http from "http";
+import path from "path";
+import { promises as fsp } from "fs";
 
 const API_BASE = "https://hummus.sys42.net/api/v6";
 const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
@@ -8,6 +10,53 @@ const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
 const EMAIL    = process.env.BOT_EMAIL    ?? "";
 const PASSWORD = process.env.BOT_PASSWORD ?? "";
 const PREFIX   = "b!";
+
+const DATA_FILE = path.join(process.cwd(), "user_data.json");
+let STORE = { users: {} };
+let saveScheduled = false;
+
+async function loadStore() {
+  try {
+    const raw = await fsp.readFile(DATA_FILE, "utf8");
+    STORE = JSON.parse(raw);
+    console.log(`[Store] Loaded ${Object.keys(STORE.users || {}).length} users`);
+  } catch (err) {
+    if (err.code !== "ENOENT") console.error("[Store] Failed to load:", err);
+    STORE = { users: {} };
+  }
+}
+
+async function saveStore() {
+  const tmp = DATA_FILE + ".tmp";
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(STORE, null, 2), "utf8");
+    await fsp.rename(tmp, DATA_FILE);
+    saveScheduled = false;
+    // console.log("[Store] Saved");
+  } catch (err) {
+    console.error("[Store] Failed to save:", err);
+  }
+}
+
+function scheduleSave() {
+  if (saveScheduled) return;
+  saveScheduled = true;
+  setTimeout(() => saveStore().catch((e) => console.error(e)), 1000);
+}
+
+function getUserStats(id) {
+  if (!STORE.users[id]) STORE.users[id] = { id, username: null, messages: 0, lastUpdated: Date.now() };
+  return STORE.users[id];
+}
+
+function incrementMessageCount(id, username) {
+  if (!id) return;
+  const u = getUserStats(id);
+  u.username = username || u.username;
+  u.messages = (u.messages || 0) + 1;
+  u.lastUpdated = Date.now();
+  scheduleSave();
+}
 
 function apiRequest(method, urlPath, body, token) {
   return new Promise((resolve, reject) => {
@@ -94,6 +143,13 @@ async function startBot(token, selfId) {
             const msg = d;
             const content = (msg.content ?? "").trim();
 
+            // Track message counts for persistence
+            try {
+              if (msg.author && msg.author.id) incrementMessageCount(msg.author.id, msg.author.username);
+            } catch (err) {
+              console.error("[Store] Failed to increment message count:", err);
+            }
+
             if (content.startsWith(PREFIX)) {
               const withoutPrefix = content.slice(PREFIX.length).trim();
               const [cmd, ...args] = withoutPrefix.split(/\s+/);
@@ -125,6 +181,21 @@ async function startBot(token, selfId) {
                 }
               }
             }
+            // stats command
+            if (content.startsWith(PREFIX)) {
+              const withoutPrefix = content.slice(PREFIX.length).trim();
+              const [cmd2, ...args2] = withoutPrefix.split(/\s+/);
+              if (cmd2?.toLowerCase() === "stats") {
+                const mention = (Array.isArray(d.mentions) && d.mentions[0]) ? d.mentions[0] : null;
+                const targetId = mention ? mention.id : msg.author.id;
+                const stats = STORE.users[targetId];
+                if (!stats) {
+                  await send(msg.channel_id, "No stats recorded for that user.", token);
+                } else {
+                  await send(msg.channel_id, `${stats.username ?? targetId} — messages: ${stats.messages}` , token);
+                }
+              }
+            }
           }
           break;
         }
@@ -149,9 +220,21 @@ async function startBot(token, selfId) {
 
 async function main() {
   console.log("=== FriendBot ===");
+  await loadStore();
+  // autosave every 30s
+  setInterval(() => saveStore().catch((e) => console.error(e)), 30000);
   const token = await login();
   const me = await apiRequest("GET", "/users/@me", undefined, token);
   console.log(`Authenticated as: ${me.username}`);
+
+  // ensure store is saved on shutdown/crash
+  const saveAndExit = (code = 0) => {
+    saveStore().then(() => process.exit(code)).catch(() => process.exit(1));
+  };
+  process.on("SIGINT", () => saveAndExit(0));
+  process.on("SIGTERM", () => saveAndExit(0));
+  process.on("uncaughtException", (err) => { console.error(err); saveAndExit(1); });
+
   await startBot(token, me.id);
 }
 
