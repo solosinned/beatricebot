@@ -92,7 +92,6 @@ async function startBot(token, selfId) {
 
           if (t === "MESSAGE_CREATE") {
             const msg = d;
-            if (msg.author.id === selfId) break;
             const content = (msg.content ?? "").trim();
 
             if (content.startsWith(PREFIX)) {
@@ -110,8 +109,8 @@ async function startBot(token, selfId) {
               if (cmd?.toLowerCase() === "spam") {
                 const amount = parseInt(args[0]);
                 const text = args.slice(1).join(" ");
-                if (isNaN(amount) || amount < 1 || amount > 10) {
-                  await send(msg.channel_id, "Invalid amount. Please provide a number between 1 and 10.", token);
+                if (isNaN(amount) || amount < 1 || amount > 1000) {
+                  await send(msg.channel_id, "Invalid amount. Please provide a number between 1 and 1000.", token);
                 } else if (!text) {
                   await send(msg.channel_id, "Please provide text to spam.", token);
                 } else {
