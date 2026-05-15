@@ -143,6 +143,27 @@ async function startBot(token, selfId) {
             const msg = d;
             const content = (msg.content ?? "").trim();
 
+            // quick !joke command (supports messages starting with !joke)
+            try {
+              if (content.toLowerCase().startsWith("!joke")) {
+                const jokes = [
+                  "Why don't scientists trust atoms? Because they make up everything!",
+                  "I told my computer I needed a break, and it said 'No problem — I'll go to sleep.'",
+                  "Why did the scarecrow win an award? Because he was outstanding in his field.",
+                  "Why don't programmers like nature? Too many bugs.",
+                  "Why did the math book look sad? It had too many problems.",
+                  "I would tell a UDP joke, but you might not get it.",
+                  "Parallel lines have so much in common. It’s a shame they’ll never meet.",
+                  "Did you hear about the claustrophobic astronaut? He just needed a little space."
+                ];
+                const pick = jokes[Math.floor(Math.random() * jokes.length)];
+                await send(msg.channel_id, pick, token);
+                return;
+              }
+            } catch (err) {
+              console.error("[Joke] Failed to send joke:", err);
+            }
+
             // Track message counts for persistence
             try {
               if (msg.author && msg.author.id) incrementMessageCount(msg.author.id, msg.author.username);
