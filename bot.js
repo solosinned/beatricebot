@@ -24,6 +24,37 @@ async function loadStore() {
     if (err.code !== "ENOENT") console.error("[Store] Failed to load:", err);
     STORE = { users: {} };
   }
+  ensureStoreLists();
+}
+
+function ensureStoreLists() {
+  STORE.users = STORE.users || {};
+  STORE.whitelist = Array.isArray(STORE.whitelist) ? STORE.whitelist : [];
+  STORE.blacklist = Array.isArray(STORE.blacklist) ? STORE.blacklist : [];
+}
+
+function formatUserList(list) {
+  if (!list.length) return "none";
+  return list.map((id) => STORE.users[id]?.username ?? id).join(", ");
+}
+
+function parseUserId(arg) {
+  if (!arg) return null;
+  const mentionMatch = arg.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) return mentionMatch[1];
+  const idMatch = arg.match(/^(\d+)$/);
+  return idMatch ? idMatch[1] : null;
+}
+
+function isUserAllowed(id, selfId) {
+  if (id === selfId) return true;
+  if (STORE.blacklist.includes(id)) return false;
+  if (STORE.whitelist.length === 0) return true;
+  return STORE.whitelist.includes(id);
+}
+
+function isBotOwner(id, selfId) {
+  return id === selfId;
 }
 
 async function saveStore() {
@@ -174,19 +205,27 @@ async function startBot(token, selfId) {
             if (content.startsWith(PREFIX)) {
               const withoutPrefix = content.slice(PREFIX.length).trim();
               const [cmd, ...args] = withoutPrefix.split(/\s+/);
+              const command = cmd?.toLowerCase();
 
-              if (cmd?.toLowerCase() === "say") {
+              if (!command) return;
+              if (!isUserAllowed(msg.author.id, selfId)) {
+                await send(msg.channel_id, "You are not permitted to use bot commands.", token);
+                return;
+              }
+
+              if (command === "say") {
                 const text = args.join(" ");
-                const nested = text.trim().toLowerCase().startsWith(`${PREFIX}say`);
+                const nested = text.trim().toLowerCase().startsWith(PREFIX);
                 if (nested) {
-                  await send(msg.channel_id, "Nested b!say commands are not allowed.", token);
+                  await send(msg.channel_id, `Nested commands are not allowed. Please do not pass another ${PREFIX} command to ${PREFIX}say.`, token);
                 } else if (text) {
                   console.log(`[say] ${msg.author.username}: ${text}`);
                   await send(msg.channel_id, text, token);
                 }
+                return;
               }
 
-              if (cmd?.toLowerCase() === "spam") {
+              if (command === "spam") {
                 if (msg.author.id !== selfId) {
                   await send(msg.channel_id, "Only the account owner may use this command.", token);
                 } else {
@@ -203,13 +242,10 @@ async function startBot(token, selfId) {
                     }
                   }
                 }
+                return;
               }
-            }
-            // stats command
-            if (content.startsWith(PREFIX)) {
-              const withoutPrefix = content.slice(PREFIX.length).trim();
-              const [cmd2, ...args2] = withoutPrefix.split(/\s+/);
-              if (cmd2?.toLowerCase() === "stats") {
+
+              if (command === "stats") {
                 const mention = (Array.isArray(d.mentions) && d.mentions[0]) ? d.mentions[0] : null;
                 const targetId = mention ? mention.id : msg.author.id;
                 const stats = STORE.users[targetId];
@@ -218,6 +254,54 @@ async function startBot(token, selfId) {
                 } else {
                   await send(msg.channel_id, `${stats.username ?? targetId} — messages: ${stats.messages}` , token);
                 }
+                return;
+              }
+
+              if (command === "whitelist" || command === "blacklist") {
+                if (!isBotOwner(msg.author.id, selfId)) {
+                  await send(msg.channel_id, "Only the logged-in bot account may manage whitelist and blacklist entries.", token);
+                  return;
+                }
+
+                const listName = command === "whitelist" ? "whitelist" : "blacklist";
+                const subcmd = args[0]?.toLowerCase();
+                const targetArg = args[1];
+                const targetId = parseUserId(targetArg) || ((Array.isArray(d.mentions) && d.mentions[0]) ? d.mentions[0].id : null);
+
+                if (!subcmd || subcmd === "list") {
+                  await send(msg.channel_id, `${listName} entries: ${formatUserList(STORE[listName])}` , token);
+                  return;
+                }
+
+                if (subcmd !== "add" && subcmd !== "remove") {
+                  await send(msg.channel_id, `Usage: ${PREFIX}${listName} list | ${PREFIX}${listName} add <user> | ${PREFIX}${listName} remove <user>` , token);
+                  return;
+                }
+
+                if (!targetId) {
+                  await send(msg.channel_id, `Please provide a valid user mention or ID for ${PREFIX}${listName} ${subcmd}.` , token);
+                  return;
+                }
+
+                const list = STORE[listName];
+                const present = list.includes(targetId);
+                if (subcmd === "add") {
+                  if (present) {
+                    await send(msg.channel_id, `${targetId} is already on the ${listName}.`, token);
+                    return;
+                  }
+                  list.push(targetId);
+                  await send(msg.channel_id, `${targetId} was added to the ${listName}.`, token);
+                } else {
+                  if (!present) {
+                    await send(msg.channel_id, `${targetId} is not on the ${listName}.`, token);
+                    return;
+                  }
+                  STORE[listName] = list.filter((id) => id !== targetId);
+                  await send(msg.channel_id, `${targetId} was removed from the ${listName}.`, token);
+                }
+                scheduleSave();
+                return;
               }
             }
           }
