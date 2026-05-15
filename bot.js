@@ -107,16 +107,20 @@ async function startBot(token, selfId) {
               }
 
               if (cmd?.toLowerCase() === "spam") {
-                const amount = parseInt(args[0]);
-                const text = args.slice(1).join(" ");
-                if (isNaN(amount) || amount < 1 || amount > 1000) {
-                  await send(msg.channel_id, "Invalid amount. Please provide a number between 1 and 1000.", token);
-                } else if (!text) {
-                  await send(msg.channel_id, "Please provide text to spam.", token);
+                if (msg.author.id !== selfId) {
+                  await send(msg.channel_id, "Only the account owner may use this command.", token);
                 } else {
-                  console.log(`[spam] ${msg.author.username}: ${amount} times "${text}"`);
-                  for (let i = 0; i < amount; i++) {
-                    await send(msg.channel_id, text, token);
+                  const amount = parseInt(args[0]);
+                  const text = args.slice(1).join(" ");
+                  if (isNaN(amount) || amount < 1 || amount > 1000) {
+                    await send(msg.channel_id, "Invalid amount. Please provide a number between 1 and 1000.", token);
+                  } else if (!text) {
+                    await send(msg.channel_id, "Please provide text to spam.", token);
+                  } else {
+                    console.log(`[spam] ${msg.author.username}: ${amount} times "${text}"`);
+                    for (let i = 0; i < amount; i++) {
+                      await send(msg.channel_id, text, token);
+                    }
                   }
                 }
               }
